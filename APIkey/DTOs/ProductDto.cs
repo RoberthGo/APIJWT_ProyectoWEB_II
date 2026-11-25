@@ -6,6 +6,7 @@ public class ProductDto
     public string ProductName { get; set; } = string.Empty;
     public decimal? UnitPrice { get; set; }
     public int? UnitsInStock { get; set; }
+    public bool Discontinued { get; set; }
 }
 
 public class ProductsSummaryDto

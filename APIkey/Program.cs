@@ -223,6 +223,14 @@ app.UseExceptionHandler();
 // Convierte códigos de estado vacíos en ProblemDetails
 app.UseStatusCodePages();
 
+// Cabeceras anti-clickjacking en todas las respuestas
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none';";
+    await next();
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

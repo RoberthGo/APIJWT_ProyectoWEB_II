@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -10,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
-using APIkey.Helpers;
 using APIkey.Models;
 
 namespace APIkey.Controllers
@@ -27,85 +24,6 @@ namespace APIkey.Controllers
             _context = context;
         }
 
-        private static string ExtractAsciiInitials(string username)
-        {
-            var normalized = TextHelper.RemoveDiacritics(username);
-            var cleanBuilder = new StringBuilder(normalized.Length);
-            foreach (var ch in normalized)
-            {
-                if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'))
-                {
-                    cleanBuilder.Append(char.ToUpperInvariant(ch));
-                }
-                else
-                {
-                    cleanBuilder.Append(' ');
-                }
-            }
-
-            var tokens = cleanBuilder
-                .ToString()
-                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            if (tokens.Length >= 2)
-            {
-                var sb = new StringBuilder(3);
-                foreach (var token in tokens)
-                {
-                    sb.Append(token[0]);
-                    if (sb.Length == 3)
-                    {
-                        break;
-                    }
-                }
-                return sb.ToString();
-            }
-
-            if (tokens.Length == 1)
-            {
-                return tokens[0].Length >= 2 ? tokens[0][..2] : tokens[0];
-            }
-
-            return "CL";
-        }
-
-        private static string GenerateDynamicCustomerId(string username, HashSet<string> usedIds)
-        {
-            var initials = ExtractAsciiInitials(username);
-            for (var counter = 1; counter <= 9999; counter++)
-            {
-                var suffix = counter.ToString(CultureInfo.InvariantCulture);
-                var maxPrefixLen = Math.Max(1, 5 - suffix.Length);
-                var prefix = initials.Length > maxPrefixLen ? initials[..maxPrefixLen] : initials;
-                var candidate = prefix + suffix;
-
-                if (usedIds.Add(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            // Respaldo acotado en base 36 (5 caracteres alfanuméricos) si se agotaran los 9,999 sufijos decimales
-            const string alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            for (var fallback = 1; fallback <= 60466175; fallback++)
-            {
-                var value = fallback;
-                var chars = new char[5];
-                for (var i = 4; i >= 0; i--)
-                {
-                    chars[i] = alphabet[value % 36];
-                    value /= 36;
-                }
-                var candidate = new string(chars);
-                if (usedIds.Add(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            throw new InvalidOperationException("No se pudo generar un identificador único de cliente.");
-        }
-
         private async Task<List<CustomerDto>> BuildUnifiedCustomersAsync()
         {
             var northwindCustomers = await _context.Customers
@@ -117,13 +35,6 @@ namespace APIkey.Controllers
                     ContactName = c.ContactName
                 })
                 .ToListAsync();
-
-            var usedIds = new HashSet<string>(
-                northwindCustomers
-                    .Where(c => !string.IsNullOrWhiteSpace(c.CustomerId))
-                    .Select(c => c.CustomerId.Trim()),
-                StringComparer.OrdinalIgnoreCase
-            );
 
             // Filtrar usuarios activos exclusivamente por su rol CLIENTE en base de datos
             var activeClientUsers = await _context.Users
@@ -139,10 +50,9 @@ namespace APIkey.Controllers
 
             foreach (var user in activeClientUsers)
             {
-                var dynamicId = GenerateDynamicCustomerId(user.Username, usedIds);
                 unified.Add(new CustomerDto
                 {
-                    CustomerId = dynamicId,
+                    CustomerId = $"USR-{user.Id}",
                     CompanyName = user.Email,
                     ContactName = user.Username
                 });

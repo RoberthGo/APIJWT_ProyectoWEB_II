@@ -35,7 +35,8 @@ namespace APIkey.Controllers
                     ProductId = p.ProductId,
                     ProductName = p.ProductName,
                     UnitPrice = p.UnitPrice,
-                    UnitsInStock = p.UnitsInStock
+                    UnitsInStock = p.UnitsInStock,
+                    Discontinued = p.Discontinued == true
                 })
                 .ToListAsync();
 
@@ -58,7 +59,8 @@ namespace APIkey.Controllers
                     ProductId = p.ProductId,
                     ProductName = p.ProductName,
                     UnitPrice = p.UnitPrice,
-                    UnitsInStock = p.UnitsInStock
+                    UnitsInStock = p.UnitsInStock,
+                    Discontinued = p.Discontinued == true
                 })
                 .FirstOrDefaultAsync();
 
@@ -98,7 +100,8 @@ namespace APIkey.Controllers
                     ProductId = product.ProductId,
                     ProductName = product.ProductName,
                     UnitPrice = product.UnitPrice,
-                    UnitsInStock = product.UnitsInStock
+                    UnitsInStock = product.UnitsInStock,
+                    Discontinued = product.Discontinued == true
                 };
 
                 return CreatedAtAction(nameof(GetProduct), new { id = product.ProductId }, responseDto);
