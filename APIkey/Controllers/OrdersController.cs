@@ -390,6 +390,7 @@ namespace APIkey.Controllers
         // CLIENTE puede cancelar únicamente sus propios pedidos si no han sido entregados ni cancelados.
         // Cancelar devuelve atómicamente el stock de los productos y deja el pedido en estado final irreversible.
         [HttpPatch("{id}/status")]
+        [Authorize(Roles = Role.AdminName + "," + Role.ClienteName)]
         public async Task<ActionResult<OrderDto>> PatchOrderStatus(int id, UpdateOrderStatusDto dto)
         {
             var user = await ResolveCurrentUserAsync();
@@ -413,30 +414,12 @@ namespace APIkey.Controllers
             }
 
             var role = user.Role.Name.Trim().ToUpperInvariant();
-            if (role == Role.EmpleadoName)
-            {
-                return Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Permisos insuficientes",
-                    detail: "No tienes permisos para modificar el estado logístico de los pedidos."
-                );
-            }
-
             if (role == Role.ClienteName && targetStatus != StatusCancelado)
             {
                 return Problem(
                     statusCode: StatusCodes.Status403Forbidden,
                     title: "Operación no permitida",
                     detail: "Solo puedes cancelar tus propios pedidos activos."
-                );
-            }
-
-            if (role != Role.AdminName && role != Role.ClienteName)
-            {
-                return Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Permisos insuficientes",
-                    detail: "No tienes permisos para realizar esta operación."
                 );
             }
 

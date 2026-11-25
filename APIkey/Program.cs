@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
@@ -19,7 +18,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
 
 // Soporte nativo para ProblemDetails (RFC 7807)
 builder.Services.AddProblemDetails();
@@ -48,7 +46,6 @@ builder.Services
     .AddJwtBearer(options =>
     {
         options.MapInboundClaims = false;
-        options.RequireHttpsMetadata = false;
         options.SaveToken = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {

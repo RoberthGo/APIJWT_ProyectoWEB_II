@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using APIkey.Models;
 using Microsoft.EntityFrameworkCore;
-using Pomelo.EntityFrameworkCore.MySql.Scaffolding.Internal;
 
 namespace APIkey.Data;
 
