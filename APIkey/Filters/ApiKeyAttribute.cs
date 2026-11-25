@@ -59,13 +59,15 @@ public class ApiKeyAttribute : ActionFilterAttribute, IAsyncActionFilter
         var providedApiKeyHash = ApiKeysController.HashApiKey(providedApiKey);
         var utcNow = DateTime.UtcNow;
 
-        var exists = await dbContext.ApiKeys
+        var matchedKey = await dbContext.ApiKeys
             .AsNoTracking()
-            .AnyAsync(k => k.KeyHash == providedApiKeyHash &&
-                           k.IsActive &&
-                           (k.ExpiresAt == null || k.ExpiresAt > utcNow));
+            .Where(k => k.KeyHash == providedApiKeyHash &&
+                        k.IsActive &&
+                        (k.ExpiresAt == null || k.ExpiresAt > utcNow))
+            .Select(k => new { k.ClientIdentifier })
+            .FirstOrDefaultAsync();
 
-        if (!exists)
+        if (matchedKey == null)
         {
             var problemDetails = new ProblemDetails
             {
@@ -83,6 +85,7 @@ public class ApiKeyAttribute : ActionFilterAttribute, IAsyncActionFilter
             return;
         }
 
+        context.HttpContext.Items["ClientIdentifier"] = matchedKey.ClientIdentifier;
         await next();
     }
 }

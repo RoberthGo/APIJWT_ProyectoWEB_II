@@ -164,28 +164,37 @@ public partial class ContextDB : DbContext
 
             entity.HasIndex(e => e.ShippedDate, "ShippedDate");
 
+            entity.HasIndex(e => e.UserId, "IX_orders_UserID");
+
             entity.Property(e => e.OrderId).HasColumnName("OrderID");
             entity.Property(e => e.CustomerId)
                 .HasMaxLength(5)
                 .HasColumnName("CustomerID");
+            entity.Property(e => e.UserId).HasColumnName("UserID");
             entity.Property(e => e.EmployeeId).HasColumnName("EmployeeID");
             entity.Property(e => e.Freight)
                 .HasPrecision(19, 4)
                 .HasDefaultValueSql("'0.0000'");
             entity.Property(e => e.OrderDate).HasColumnType("datetime");
             entity.Property(e => e.RequiredDate).HasColumnType("datetime");
-            entity.Property(e => e.ShipAddress).HasMaxLength(60);
-            entity.Property(e => e.ShipCity).HasMaxLength(15);
-            entity.Property(e => e.ShipCountry).HasMaxLength(15);
-            entity.Property(e => e.ShipName).HasMaxLength(40);
+            entity.Property(e => e.ShipAddress).HasMaxLength(200);
+            entity.Property(e => e.ShipCity).HasMaxLength(60);
+            entity.Property(e => e.ShipCountry).HasMaxLength(60);
+            entity.Property(e => e.ShipName).HasMaxLength(80);
             entity.Property(e => e.ShipPostalCode).HasMaxLength(10);
             entity.Property(e => e.ShipRegion).HasMaxLength(15);
             entity.Property(e => e.ShippedDate).HasColumnType("datetime");
+            entity.Property(e => e.Status).HasMaxLength(30);
 
             entity.HasOne(d => d.Customer).WithMany(p => p.Orders)
                 .HasForeignKey(d => d.CustomerId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("orders_ibfk_1");
+
+            entity.HasOne(d => d.User).WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("orders_ibfk_user");
 
             entity.HasOne(d => d.Employee).WithMany(p => p.Orders)
                 .HasForeignKey(d => d.EmployeeId)

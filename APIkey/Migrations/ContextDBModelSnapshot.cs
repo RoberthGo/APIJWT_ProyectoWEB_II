@@ -284,20 +284,20 @@ namespace APIkey.Migrations
                         .HasColumnType("datetime");
 
                     b.Property<string>("ShipAddress")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<string>("ShipCity")
                         .HasMaxLength(60)
                         .HasColumnType("varchar(60)");
 
-                    b.Property<string>("ShipCity")
-                        .HasMaxLength(15)
-                        .HasColumnType("varchar(15)");
-
                     b.Property<string>("ShipCountry")
-                        .HasMaxLength(15)
-                        .HasColumnType("varchar(15)");
+                        .HasMaxLength(60)
+                        .HasColumnType("varchar(60)");
 
                     b.Property<string>("ShipName")
-                        .HasMaxLength(40)
-                        .HasColumnType("varchar(40)");
+                        .HasMaxLength(80)
+                        .HasColumnType("varchar(80)");
 
                     b.Property<string>("ShipPostalCode")
                         .HasMaxLength(10)
@@ -313,12 +313,22 @@ namespace APIkey.Migrations
                     b.Property<DateTime?>("ShippedDate")
                         .HasColumnType("datetime");
 
+                    b.Property<string>("Status")
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int")
+                        .HasColumnName("UserID");
+
                     b.HasKey("OrderId")
                         .HasName("PRIMARY");
 
                     b.HasIndex(new[] { "CustomerId" }, "CustomerID");
 
                     b.HasIndex(new[] { "EmployeeId" }, "EmployeeID");
+
+                    b.HasIndex(new[] { "UserId" }, "IX_orders_UserID");
 
                     b.HasIndex(new[] { "OrderDate" }, "OrderDate");
 
@@ -604,11 +614,19 @@ namespace APIkey.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .HasConstraintName("orders_ibfk_3");
 
+                    b.HasOne("APIkey.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("orders_ibfk_user");
+
                     b.Navigation("Customer");
 
                     b.Navigation("Employee");
 
                     b.Navigation("ShipViaNavigation");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("APIkey.Models.OrderDetail", b =>
