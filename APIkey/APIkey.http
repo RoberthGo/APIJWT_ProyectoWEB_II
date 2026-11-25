@@ -1,5 +1,5 @@
 @APIkey_HostAddress = https://localhost:7039
-@ApiKey = ak_reemplazar_con_api_key_de_login
+@JwtToken = reemplazar_con_token_jwt_de_login
 
 ### ========================================================
 ### 1. PRODUCTOS (Consultas y DTOs)
@@ -8,14 +8,14 @@
 ### Obtener resumen de productos (Total y lista ligera)
 GET {{APIkey_HostAddress}}/api/products
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Obtener producto existente por ID
 GET {{APIkey_HostAddress}}/api/products/1
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
@@ -23,30 +23,30 @@ X-API-KEY: {{ApiKey}}
 ### 2. PRUEBAS DE PROBLEM DETAILS (RFC 7807) Y ERRORES
 ### ========================================================
 
-### Prueba 401: Solicitud sin API Key (Retorna ProblemDetails en JSON)
+### Prueba 401: Solicitud sin token JWT (Retorna ProblemDetails en JSON)
 GET {{APIkey_HostAddress}}/api/products
 Accept: application/json
 
 ###
 
-### Prueba 401: API Key incorrecta (Retorna ProblemDetails en JSON)
+### Prueba 401: Token JWT inválido (Retorna ProblemDetails en JSON)
 GET {{APIkey_HostAddress}}/api/products
 Accept: application/json
-X-API-KEY: CLAVE-INVALIDA-9999
+Authorization: Bearer token.invalido.9999
 
 ###
 
 ### Prueba 404: Producto no encontrado (Retorna ProblemDetails en JSON)
 GET {{APIkey_HostAddress}}/api/products/999999
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Prueba 400: Validación con DataAnnotations fallida (Campos obligatorios / valores inválidos)
 POST {{APIkey_HostAddress}}/api/products
 Content-Type: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 {
   "productName": "",
@@ -56,10 +56,10 @@ X-API-KEY: {{ApiKey}}
 
 ###
 
-### Prueba 201: Crear producto válido con DTO
+### Prueba 201: Crear producto válido con DTO (requiere ADMIN)
 POST {{APIkey_HostAddress}}/api/products
 Content-Type: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 {
   "productName": "Teclado Mecanico Escolar",
@@ -74,24 +74,24 @@ X-API-KEY: {{ApiKey}}
 ### 3. CLIENTES (Solo CustomerId y Nombre)
 ### ========================================================
 
-### Obtener lista de clientes
+### Obtener lista de clientes (requiere ADMIN o EMPLEADO)
 GET {{APIkey_HostAddress}}/api/customers
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Obtener cliente por ID
 GET {{APIkey_HostAddress}}/api/customers/ALFKI
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Prueba 404: Cliente no encontrado
 GET {{APIkey_HostAddress}}/api/customers/NOEXISTE
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
@@ -99,33 +99,39 @@ X-API-KEY: {{ApiKey}}
 ### 4. ÓRDENES (Sin llaves foráneas)
 ### ========================================================
 
-### Obtener órdenes
+### Obtener órdenes (requiere ADMIN o EMPLEADO)
 GET {{APIkey_HostAddress}}/api/orders
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
+
+###
+
+### Obtener mis órdenes
+GET {{APIkey_HostAddress}}/api/orders/mine
+Accept: application/json
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Obtener orden específica por ID
 GET {{APIkey_HostAddress}}/api/orders/10248
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
 ### Prueba 404: Orden no encontrada
 GET {{APIkey_HostAddress}}/api/orders/999999
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}
 
 ###
 
-
 ### ========================================================
-### 5. AUTENTICACIÓN (Registro y Login)
+### 5. AUTENTICACIÓN JWT (Registro, Login y Perfil)
 ### ========================================================
 
-### Registrar un nuevo usuario (Crea el usuario y emite su primera API Key)
+### Registrar un nuevo usuario (Crea el usuario CLIENTE y emite su token JWT)
 POST {{APIkey_HostAddress}}/api/auth/register
 Content-Type: application/json
 
@@ -137,7 +143,7 @@ Content-Type: application/json
 
 ###
 
-### Iniciar sesión (Valida credenciales y genera una nueva API Key)
+### Iniciar sesión (Valida credenciales y genera un token JWT Bearer)
 POST {{APIkey_HostAddress}}/api/auth/login
 Content-Type: application/json
 
@@ -148,13 +154,14 @@ Content-Type: application/json
 
 ###
 
-### Probar endpoint protegido usando la API Key devuelta por Login o Register
+### Probar endpoint protegido usando el token JWT devuelto por Login o Register
 GET {{APIkey_HostAddress}}/api/products
 Accept: application/json
-X-API-KEY: ak_pega_aqui_tu_clave
+Authorization: Bearer pega_aqui_tu_jwt
 
+###
 
 ### Consultar perfil de sesión y capacidades de UI (validado contra BD, sin nombres de rol)
 GET {{APIkey_HostAddress}}/api/auth/me
 Accept: application/json
-X-API-KEY: {{ApiKey}}
+Authorization: Bearer {{JwtToken}}

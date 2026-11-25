@@ -1,19 +1,19 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
-using APIkey.Filters;
 using APIkey.Models;
 
 namespace APIkey.Controllers
 {
     [EnableCors("AllowAll")]
-    [ApiKey]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class ProductsController : ControllerBase
@@ -80,7 +80,7 @@ namespace APIkey.Controllers
         // POST: api/Products
         // Solo ADMIN (validado en BD) puede crear productos
         [HttpPost]
-        [RequireRoles(Role.AdminName)]
+        [Authorize(Roles = Role.AdminName)]
         public async Task<ActionResult<ProductDto>> PostProduct(ProductUpsertDto dto)
         {
             try
@@ -119,7 +119,7 @@ namespace APIkey.Controllers
         // PUT: api/Products/5
         // ADMIN puede actualizar todos los campos; EMPLEADO solo precio y existencias (validado en BD)
         [HttpPut("{id}")]
-        [RequireRoles(Role.AdminName, Role.EmpleadoName)]
+        [Authorize(Roles = Role.AdminName + "," + Role.EmpleadoName)]
         public async Task<IActionResult> PutProduct(int id, ProductUpsertDto dto)
         {
             var product = await _context.Products.FindAsync(id);
@@ -132,8 +132,7 @@ namespace APIkey.Controllers
                 );
             }
 
-            var currentRole = (HttpContext.Items["UserRole"] as string ?? string.Empty).Trim().ToUpperInvariant();
-            if (currentRole == Role.AdminName)
+            if (User.IsInRole(Role.AdminName))
             {
                 product.ProductName = dto.ProductName;
                 product.Discontinued = dto.Discontinued;
@@ -160,7 +159,7 @@ namespace APIkey.Controllers
         // DELETE: api/Products/5
         // Solo ADMIN (validado en BD) puede eliminar productos
         [HttpDelete("{id}")]
-        [RequireRoles(Role.AdminName)]
+        [Authorize(Roles = Role.AdminName)]
         public async Task<IActionResult> DeleteProduct(int id)
         {
             var product = await _context.Products.FindAsync(id);

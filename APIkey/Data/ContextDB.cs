@@ -27,8 +27,6 @@ public partial class ContextDB : DbContext
 
     public virtual DbSet<OrderDetail> OrderDetails { get; set; }
 
-    public virtual DbSet<ApiKey> ApiKeys { get; set; }
-
     public virtual DbSet<Role> Roles { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
@@ -339,24 +337,6 @@ public partial class ContextDB : DbContext
             entity.Property(e => e.Phone).HasMaxLength(24);
             entity.Property(e => e.PostalCode).HasMaxLength(10);
             entity.Property(e => e.Region).HasMaxLength(15);
-        });
-
-        modelBuilder.Entity<ApiKey>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("PRIMARY");
-
-            entity
-                .ToTable("api_keys")
-                .HasCharSet("utf8mb4")
-                .UseCollation("utf8mb4_0900_ai_ci");
-
-            entity.HasIndex(e => e.ClientIdentifier, "IX_api_keys_ClientIdentifier");
-            entity.HasIndex(e => e.IsActive, "IX_api_keys_IsActive");
-
-            entity.Property(e => e.ClientIdentifier).HasMaxLength(200).IsRequired();
-            entity.Property(e => e.KeyHash).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.CreatedAt).HasColumnType("datetime").IsRequired();
-            entity.Property(e => e.ExpiresAt).HasColumnType("datetime");
         });
 
         OnModelCreatingPartial(modelBuilder);

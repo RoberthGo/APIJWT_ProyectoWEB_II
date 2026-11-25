@@ -66,16 +66,18 @@ public class SessionProfileDto
     public UiPermissionsDto Permissions { get; set; } = new();
 }
 
-// Respuesta de Login / Registro con API Key y capacidades de interfaz
+// Respuesta de Login / Registro con JWT Bearer y capacidades de interfaz
 public class AuthResponseDto
 {
     public int UserId { get; set; }
 
     public string Username { get; set; } = string.Empty;
 
-    public string ApiKey { get; set; } = string.Empty;
+    public string Token { get; set; } = string.Empty;
 
-    public DateTime? ExpiresAt { get; set; }
+    public string TokenType { get; set; } = "Bearer";
+
+    public DateTime ExpiresAt { get; set; }
 
     public string DefaultView { get; set; } = "./catalogo.html";
 

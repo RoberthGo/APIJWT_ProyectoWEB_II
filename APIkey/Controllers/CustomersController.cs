@@ -4,20 +4,19 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
-using APIkey.Filters;
 using APIkey.Models;
 
 namespace APIkey.Controllers
 {
     [EnableCors("AllowAll")]
-    [ApiKey]
-    [RequireRoles(Role.AdminName, Role.EmpleadoName)]
+    [Authorize(Roles = Role.AdminName + "," + Role.EmpleadoName)]
     [Route("api/[controller]")]
     [ApiController]
     public class CustomersController : ControllerBase

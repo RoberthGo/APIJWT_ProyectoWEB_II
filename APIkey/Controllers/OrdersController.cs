@@ -2,21 +2,22 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
-using APIkey.Filters;
 using APIkey.Models;
 
 namespace APIkey.Controllers
 {
     [EnableCors("AllowAll")]
-    [ApiKey]
+    [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class OrdersController : ControllerBase
@@ -38,17 +39,16 @@ namespace APIkey.Controllers
 
         private async Task<User?> ResolveCurrentUserAsync()
         {
-            var clientIdentifier = HttpContext.Items["ClientIdentifier"] as string;
-            if (string.IsNullOrWhiteSpace(clientIdentifier))
+            var rawUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(rawUserId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId))
             {
                 return null;
             }
 
-            var normalized = clientIdentifier.Trim().ToLowerInvariant();
             return await _context.Users
                 .AsNoTracking()
                 .Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Username.ToLower() == normalized && u.IsActive);
+                .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
         }
 
         private static string RemoveDiacritics(string text)
@@ -155,7 +155,7 @@ namespace APIkey.Controllers
         // GET: api/orders
         // Solo ADMIN y EMPLEADO (validado en BD) pueden listar todas las órdenes
         [HttpGet]
-        [RequireRoles(Role.AdminName, Role.EmpleadoName)]
+        [Authorize(Roles = Role.AdminName + "," + Role.EmpleadoName)]
         public async Task<ActionResult<IEnumerable<OrderDto>>> GetOrders()
         {
             var orders = await ProjectOrderDtos(
@@ -174,7 +174,7 @@ namespace APIkey.Controllers
         }
 
         // GET: api/orders/mine
-        // Retorna únicamente las órdenes vinculadas al usuario propietario de la API Key activa
+        // Retorna únicamente las órdenes vinculadas al usuario propietario del token JWT activo
         [HttpGet("mine")]
         public async Task<ActionResult<IEnumerable<OrderDto>>> GetMyOrders()
         {
@@ -184,7 +184,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
                     title: "Usuario no identificado",
-                    detail: "No se pudo identificar un usuario activo asociado a la API Key proporcionada."
+                    detail: "No se pudo identificar un usuario activo asociado al token JWT proporcionado."
                 );
             }
 
@@ -215,7 +215,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
                     title: "Usuario no identificado",
-                    detail: "No se pudo identificar un usuario activo asociado a la API Key proporcionada."
+                    detail: "No se pudo identificar un usuario activo asociado al token JWT proporcionado."
                 );
             }
 
@@ -257,7 +257,7 @@ namespace APIkey.Controllers
         // POST: api/orders
         // Solo CLIENTE (validado en BD) puede registrar compras desde el catálogo
         [HttpPost]
-        [RequireRoles(Role.ClienteName)]
+        [Authorize(Roles = Role.ClienteName)]
         public async Task<ActionResult<OrderDto>> PostOrder(CreateOrderDto dto)
         {
             var user = await ResolveCurrentUserAsync();

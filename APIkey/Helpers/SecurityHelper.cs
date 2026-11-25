@@ -8,19 +8,6 @@ namespace APIkey.Helpers;
 
 public static class SecurityHelper
 {
-    public static string GenerateApiKey()
-    {
-        var randomBytes = RandomNumberGenerator.GetBytes(32);
-        return $"ak_{Convert.ToHexString(randomBytes).ToLowerInvariant()}";
-    }
-
-    public static string HashApiKey(string plainTextKey)
-    {
-        using var sha256 = SHA256.Create();
-        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(plainTextKey));
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
-    }
-
     public static string HashPassword(string password)
     {
         byte[] salt = RandomNumberGenerator.GetBytes(16);

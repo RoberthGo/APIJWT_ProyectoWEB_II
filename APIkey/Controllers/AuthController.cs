@@ -1,5 +1,6 @@
 using System;
-using System.Linq;
+using System.Globalization;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
@@ -8,9 +9,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
-using APIkey.Filters;
 using APIkey.Helpers;
 using APIkey.Models;
+using APIkey.Services;
 
 namespace APIkey.Controllers
 {
@@ -20,14 +21,16 @@ namespace APIkey.Controllers
     public class AuthController : ControllerBase
     {
         private readonly ContextDB _context;
+        private readonly IJwtTokenService _jwtTokenService;
 
-        public AuthController(ContextDB context)
+        public AuthController(ContextDB context, IJwtTokenService jwtTokenService)
         {
             _context = context;
+            _jwtTokenService = jwtTokenService;
         }
 
         // POST: api/auth/register
-        // Registra un nuevo usuario con rol CLIENTE en base de datos y genera su primera API Key
+        // Registra un nuevo usuario con rol CLIENTE en base de datos y emite su token JWT
         [HttpPost("register")]
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostRegister(RegisterDto dto)
@@ -72,30 +75,16 @@ namespace APIkey.Controllers
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
-                // 2. Generar su primera API Key
-                var rawApiKey = SecurityHelper.GenerateApiKey();
-                var createdAt = DateTime.UtcNow;
-                var expiresAt = createdAt.AddDays(30);
-
-                var apiKeyEntity = new ApiKey
-                {
-                    ClientIdentifier = user.Username,
-                    KeyHash = SecurityHelper.HashApiKey(rawApiKey),
-                    CreatedAt = createdAt,
-                    ExpiresAt = expiresAt,
-                    IsActive = true
-                };
-
-                _context.ApiKeys.Add(apiKeyEntity);
-                await _context.SaveChangesAsync();
-
+                // 2. Generar su token JWT firmado
+                var (token, expiresAt) = _jwtTokenService.GenerateToken(user);
                 var (defaultView, permissions) = SecurityHelper.BuildUiProfile(Role.ClienteName);
 
                 return StatusCode(StatusCodes.Status201Created, new AuthResponseDto
                 {
                     UserId = user.Id,
                     Username = user.Username,
-                    ApiKey = rawApiKey,
+                    Token = token,
+                    TokenType = "Bearer",
                     ExpiresAt = expiresAt,
                     DefaultView = defaultView,
                     Permissions = permissions
@@ -112,12 +101,13 @@ namespace APIkey.Controllers
         }
 
         // POST: api/auth/login
-        // Valida credenciales contra PBKDF2, lee el rol desde BD y retorna API Key + capacidades de UI
+        // Valida credenciales contra PBKDF2, lee el rol desde BD y retorna JWT Bearer + capacidades de UI
         [HttpPost("login")]
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostLogin(LoginDto dto)
         {
             var user = await _context.Users
+                .AsNoTracking()
                 .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Username.ToLower() == dto.Username.Trim().ToLower() && u.IsActive);
 
@@ -130,62 +120,29 @@ namespace APIkey.Controllers
                 );
             }
 
-            try
+            var (token, expiresAt) = _jwtTokenService.GenerateToken(user);
+            var (defaultView, permissions) = SecurityHelper.BuildUiProfile(user.Role.Name);
+
+            return Ok(new AuthResponseDto
             {
-                // 1. Invalidar todas las API Keys anteriores activas de este usuario
-                var oldKeys = await _context.ApiKeys
-                    .Where(k => k.ClientIdentifier.ToLower() == user.Username.ToLower() && k.IsActive)
-                    .ToListAsync();
-
-                oldKeys.ForEach(k => k.IsActive = false);
-
-                // 2. Generar y guardar la nueva API Key
-                var rawApiKey = SecurityHelper.GenerateApiKey();
-                var createdAt = DateTime.UtcNow;
-                var expiresAt = createdAt.AddDays(30);
-
-                var apiKeyEntity = new ApiKey
-                {
-                    ClientIdentifier = user.Username,
-                    KeyHash = SecurityHelper.HashApiKey(rawApiKey),
-                    CreatedAt = createdAt,
-                    ExpiresAt = expiresAt,
-                    IsActive = true
-                };
-
-                _context.ApiKeys.Add(apiKeyEntity);
-                await _context.SaveChangesAsync();
-
-                var (defaultView, permissions) = SecurityHelper.BuildUiProfile(user.Role.Name);
-
-                return Ok(new AuthResponseDto
-                {
-                    UserId = user.Id,
-                    Username = user.Username,
-                    ApiKey = rawApiKey,
-                    ExpiresAt = expiresAt,
-                    DefaultView = defaultView,
-                    Permissions = permissions
-                });
-            }
-            catch (DbUpdateException)
-            {
-                return Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: "Error al iniciar sesión",
-                    detail: "No fue posible emitir las credenciales de sesión. Intenta nuevamente."
-                );
-            }
+                UserId = user.Id,
+                Username = user.Username,
+                Token = token,
+                TokenType = "Bearer",
+                ExpiresAt = expiresAt,
+                DefaultView = defaultView,
+                Permissions = permissions
+            });
         }
 
         // GET: api/auth/me
-        // Valida la sesión activa en BD y retorna las capacidades de UI sin exponer nombres de rol
+        // Valida la sesión activa mediante JWT contra BD y retorna las capacidades de UI sin exponer nombres de rol
         [HttpGet("me")]
-        [ApiKey]
+        [Authorize]
         public async Task<ActionResult<SessionProfileDto>> GetMe()
         {
-            var clientIdentifier = HttpContext.Items["ClientIdentifier"] as string;
-            if (string.IsNullOrWhiteSpace(clientIdentifier))
+            var rawUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(rawUserId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId))
             {
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
@@ -194,11 +151,10 @@ namespace APIkey.Controllers
                 );
             }
 
-            var normalized = clientIdentifier.Trim().ToLowerInvariant();
             var user = await _context.Users
                 .AsNoTracking()
                 .Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Username.ToLower() == normalized && u.IsActive);
+                .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
 
             if (user == null || user.Role == null)
             {
