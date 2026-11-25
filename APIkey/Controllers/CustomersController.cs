@@ -5,17 +5,16 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
+using APIkey.Helpers;
 using APIkey.Models;
 
 namespace APIkey.Controllers
 {
-    [EnableCors("AllowAll")]
     [Authorize(Roles = Role.AdminName + "," + Role.EmpleadoName)]
     [Route("api/[controller]")]
     [ApiController]
@@ -30,16 +29,10 @@ namespace APIkey.Controllers
 
         private static string ExtractAsciiInitials(string username)
         {
-            var decomposed = username.Normalize(NormalizationForm.FormD);
-            var cleanBuilder = new StringBuilder(decomposed.Length);
-            foreach (var ch in decomposed)
+            var normalized = TextHelper.RemoveDiacritics(username);
+            var cleanBuilder = new StringBuilder(normalized.Length);
+            foreach (var ch in normalized)
             {
-                var category = CharUnicodeInfo.GetUnicodeCategory(ch);
-                if (category == UnicodeCategory.NonSpacingMark)
-                {
-                    continue;
-                }
-
                 if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'))
                 {
                     cleanBuilder.Append(char.ToUpperInvariant(ch));

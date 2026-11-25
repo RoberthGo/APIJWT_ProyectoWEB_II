@@ -4,9 +4,9 @@ using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
-using System.Text;
 using System.Text.Json;
 using APIkey.Data;
+using APIkey.Options;
 using APIkey.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
@@ -24,24 +24,18 @@ builder.Services.AddEndpointsApiExplorer();
 // Soporte nativo para ProblemDetails (RFC 7807)
 builder.Services.AddProblemDetails();
 
-// Servicio de emisión de tokens JWT
-builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+// Configuración JWT tipada y validada una sola vez al arranque
+var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
+var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
+jwtOptions.Validate();
 
-// Configuración JWT Bearer (HS256 + validación estricta de usuario/rol activo en BD)
-var jwtSection = builder.Configuration.GetSection("Jwt");
-var jwtSecretKey = jwtSection["SecretKey"]
-    ?? throw new InvalidOperationException("La configuración 'Jwt:SecretKey' es obligatoria.");
-var jwtIssuer = jwtSection["Issuer"]
-    ?? throw new InvalidOperationException("La configuración 'Jwt:Issuer' es obligatoria.");
-var jwtAudience = jwtSection["Audience"]
-    ?? throw new InvalidOperationException("La configuración 'Jwt:Audience' es obligatoria.");
+builder.Services.Configure<JwtOptions>(jwtSection);
+builder.Services.PostConfigure<JwtOptions>(opts => opts.Validate());
 
-if (Encoding.UTF8.GetByteCount(jwtSecretKey) < 32)
-{
-    throw new InvalidOperationException("La clave 'Jwt:SecretKey' debe tener al menos 32 bytes.");
-}
+// Servicio Singleton de emisión de tokens JWT
+builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 
-var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey));
+var signingKey = jwtOptions.CreateSigningKey();
 var problemJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
 builder.Services
@@ -59,9 +53,9 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = jwtIssuer,
+            ValidIssuer = jwtOptions.Issuer,
             ValidateAudience = true,
-            ValidAudience = jwtAudience,
+            ValidAudience = jwtOptions.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
@@ -214,12 +208,6 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    });
-    options.AddDefaultPolicy(policy =>
     {
         policy.AllowAnyOrigin()
               .AllowAnyMethod()

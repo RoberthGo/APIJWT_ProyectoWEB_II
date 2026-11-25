@@ -3,20 +3,18 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
-using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
+using APIkey.Helpers;
 using APIkey.Models;
 
 namespace APIkey.Controllers
 {
-    [EnableCors("AllowAll")]
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -51,20 +49,6 @@ namespace APIkey.Controllers
                 .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
         }
 
-        private static string RemoveDiacritics(string text)
-        {
-            var decomposed = text.Normalize(NormalizationForm.FormD);
-            var sb = new StringBuilder(decomposed.Length);
-            foreach (var ch in decomposed)
-            {
-                if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
-                {
-                    sb.Append(ch);
-                }
-            }
-            return sb.ToString().Normalize(NormalizationForm.FormC);
-        }
-
         private static string? NormalizeStatus(string? rawStatus)
         {
             if (string.IsNullOrWhiteSpace(rawStatus))
@@ -72,7 +56,7 @@ namespace APIkey.Controllers
                 return null;
             }
 
-            var key = RemoveDiacritics(rawStatus.Trim())
+            var key = TextHelper.RemoveDiacritics(rawStatus.Trim())
                 .ToUpperInvariant()
                 .Replace('-', '_')
                 .Replace(' ', '_');
