@@ -447,6 +447,45 @@ namespace APIkey.Migrations
                     MySqlEntityTypeBuilderExtensions.UseCollation(b, "utf8mb3_general_ci");
                 });
 
+            modelBuilder.Entity("APIkey.Models.Role", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.HasKey("Id")
+                        .HasName("PRIMARY");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("roles", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Name = "ADMIN"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Name = "EMPLEADO"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            Name = "CLIENTE"
+                        });
+                });
+
             modelBuilder.Entity("APIkey.Models.Shipper", b =>
                 {
                     b.Property<int>("ShipperId")
@@ -566,6 +605,11 @@ namespace APIkey.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)");
 
+                    b.Property<int>("RoleId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(3);
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -579,6 +623,8 @@ namespace APIkey.Migrations
 
                     b.HasIndex("Username")
                         .IsUnique();
+
+                    b.HasIndex(new[] { "RoleId" }, "IX_users_RoleId");
 
                     b.ToTable("users", (string)null);
                 });
@@ -669,6 +715,18 @@ namespace APIkey.Migrations
                     b.Navigation("Supplier");
                 });
 
+            modelBuilder.Entity("APIkey.Models.User", b =>
+                {
+                    b.HasOne("APIkey.Models.Role", "Role")
+                        .WithMany("Users")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("users_ibfk_role");
+
+                    b.Navigation("Role");
+                });
+
             modelBuilder.Entity("APIkey.Models.Category", b =>
                 {
                     b.Navigation("Products");
@@ -694,6 +752,11 @@ namespace APIkey.Migrations
             modelBuilder.Entity("APIkey.Models.Product", b =>
                 {
                     b.Navigation("OrderDetails");
+                });
+
+            modelBuilder.Entity("APIkey.Models.Role", b =>
+                {
+                    b.Navigation("Users");
                 });
 
             modelBuilder.Entity("APIkey.Models.Shipper", b =>

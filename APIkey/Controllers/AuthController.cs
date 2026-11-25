@@ -1,13 +1,15 @@
 using System;
-using System.Security.Cryptography;
-using System.Text;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
+using APIkey.Filters;
+using APIkey.Helpers;
 using APIkey.Models;
 
 namespace APIkey.Controllers
@@ -25,7 +27,7 @@ namespace APIkey.Controllers
         }
 
         // POST: api/auth/register
-        // Registra un nuevo usuario y le genera su primera API Key
+        // Registra un nuevo usuario con rol CLIENTE en base de datos y genera su primera API Key
         [HttpPost("register")]
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostRegister(RegisterDto dto)
@@ -56,12 +58,13 @@ namespace APIkey.Controllers
 
             try
             {
-                // 1. Crear el usuario
+                // 1. Crear el usuario asignando estrictamente el rol CLIENTE desde base de datos
                 var user = new User
                 {
                     Username = dto.Username.Trim(),
                     Email = dto.Email.Trim().ToLowerInvariant(),
-                    PasswordHash = HashPassword(dto.Password),
+                    PasswordHash = SecurityHelper.HashPassword(dto.Password),
+                    RoleId = Role.ClienteId,
                     CreatedAt = DateTime.UtcNow,
                     IsActive = true
                 };
@@ -69,15 +72,15 @@ namespace APIkey.Controllers
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
-                // 2. Generar su primera API Key reutilizando ApiKeysController
-                var rawApiKey = ApiKeysController.GenerateApiKey();
+                // 2. Generar su primera API Key
+                var rawApiKey = SecurityHelper.GenerateApiKey();
                 var createdAt = DateTime.UtcNow;
                 var expiresAt = createdAt.AddDays(30);
 
                 var apiKeyEntity = new ApiKey
                 {
                     ClientIdentifier = user.Username,
-                    KeyHash = ApiKeysController.HashApiKey(rawApiKey),
+                    KeyHash = SecurityHelper.HashApiKey(rawApiKey),
                     CreatedAt = createdAt,
                     ExpiresAt = expiresAt,
                     IsActive = true
@@ -86,34 +89,39 @@ namespace APIkey.Controllers
                 _context.ApiKeys.Add(apiKeyEntity);
                 await _context.SaveChangesAsync();
 
+                var (defaultView, permissions) = SecurityHelper.BuildUiProfile(Role.ClienteName);
+
                 return StatusCode(StatusCodes.Status201Created, new AuthResponseDto
                 {
                     UserId = user.Id,
                     Username = user.Username,
                     ApiKey = rawApiKey,
-                    ExpiresAt = expiresAt
+                    ExpiresAt = expiresAt,
+                    DefaultView = defaultView,
+                    Permissions = permissions
                 });
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al registrar usuario",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    detail: "No fue posible completar el registro de la cuenta. Verifica los datos ingresados."
                 );
             }
         }
 
         // POST: api/auth/login
-        // Valida credenciales y genera una nueva API Key para el usuario
+        // Valida credenciales contra PBKDF2, lee el rol desde BD y retorna API Key + capacidades de UI
         [HttpPost("login")]
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostLogin(LoginDto dto)
         {
             var user = await _context.Users
+                .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Username.ToLower() == dto.Username.Trim().ToLower() && u.IsActive);
 
-            if (user == null || !VerifyPassword(dto.Password, user.PasswordHash))
+            if (user == null || user.Role == null || !SecurityHelper.VerifyPassword(dto.Password, user.PasswordHash))
             {
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
@@ -132,14 +140,14 @@ namespace APIkey.Controllers
                 oldKeys.ForEach(k => k.IsActive = false);
 
                 // 2. Generar y guardar la nueva API Key
-                var rawApiKey = ApiKeysController.GenerateApiKey();
+                var rawApiKey = SecurityHelper.GenerateApiKey();
                 var createdAt = DateTime.UtcNow;
                 var expiresAt = createdAt.AddDays(30);
 
                 var apiKeyEntity = new ApiKey
                 {
                     ClientIdentifier = user.Username,
-                    KeyHash = ApiKeysController.HashApiKey(rawApiKey),
+                    KeyHash = SecurityHelper.HashApiKey(rawApiKey),
                     CreatedAt = createdAt,
                     ExpiresAt = expiresAt,
                     IsActive = true
@@ -148,57 +156,68 @@ namespace APIkey.Controllers
                 _context.ApiKeys.Add(apiKeyEntity);
                 await _context.SaveChangesAsync();
 
+                var (defaultView, permissions) = SecurityHelper.BuildUiProfile(user.Role.Name);
+
                 return Ok(new AuthResponseDto
                 {
                     UserId = user.Id,
                     Username = user.Username,
                     ApiKey = rawApiKey,
-                    ExpiresAt = expiresAt
+                    ExpiresAt = expiresAt,
+                    DefaultView = defaultView,
+                    Permissions = permissions
                 });
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
-                    title: "Error al generar API Key",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    title: "Error al iniciar sesión",
+                    detail: "No fue posible emitir las credenciales de sesión. Intenta nuevamente."
                 );
             }
         }
 
-        // ==========================================
-        // Métodos Auxiliares de Seguridad (Contraseñas)
-        // ==========================================
-
-        private static string HashPassword(string password)
+        // GET: api/auth/me
+        // Valida la sesión activa en BD y retorna las capacidades de UI sin exponer nombres de rol
+        [HttpGet("me")]
+        [ApiKey]
+        public async Task<ActionResult<SessionProfileDto>> GetMe()
         {
-            byte[] salt = RandomNumberGenerator.GetBytes(16);
-            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(
-                Encoding.UTF8.GetBytes(password),
-                salt,
-                iterations: 100_000,
-                hashAlgorithm: HashAlgorithmName.SHA256,
-                outputLength: 32);
+            var clientIdentifier = HttpContext.Items["ClientIdentifier"] as string;
+            if (string.IsNullOrWhiteSpace(clientIdentifier))
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "No autorizado",
+                    detail: "No se pudo identificar la sesión activa."
+                );
+            }
 
-            return $"{Convert.ToHexString(salt)}:{Convert.ToHexString(hash)}";
-        }
+            var normalized = clientIdentifier.Trim().ToLowerInvariant();
+            var user = await _context.Users
+                .AsNoTracking()
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Username.ToLower() == normalized && u.IsActive);
 
-        private static bool VerifyPassword(string password, string storedHash)
-        {
-            var parts = storedHash.Split(':');
-            if (parts.Length != 2) return false;
+            if (user == null || user.Role == null)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "No autorizado",
+                    detail: "La cuenta asociada a la sesión ya no se encuentra activa."
+                );
+            }
 
-            byte[] salt = Convert.FromHexString(parts[0]);
-            byte[] expectedHash = Convert.FromHexString(parts[1]);
+            var (defaultView, permissions) = SecurityHelper.BuildUiProfile(user.Role.Name);
 
-            byte[] actualHash = Rfc2898DeriveBytes.Pbkdf2(
-                Encoding.UTF8.GetBytes(password),
-                salt,
-                iterations: 100_000,
-                hashAlgorithm: HashAlgorithmName.SHA256,
-                outputLength: 32);
-
-            return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
+            return Ok(new SessionProfileDto
+            {
+                UserId = user.Id,
+                Username = user.Username,
+                DefaultView = defaultView,
+                Permissions = permissions
+            });
         }
     }
 }

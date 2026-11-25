@@ -1,5 +1,5 @@
-@APIkey_HostAddress = http://localhost:5009
-@ApiKey = ROBE-LINGO-KEY-1234
+@APIkey_HostAddress = https://localhost:7039
+@ApiKey = ak_reemplazar_con_api_key_de_login
 
 ### ========================================================
 ### 1. PRODUCTOS (Consultas y DTOs)
@@ -154,8 +154,7 @@ Accept: application/json
 X-API-KEY: ak_pega_aqui_tu_clave
 
 
-###
-### Regenerar API Key (Invalida la actual y emite una nueva para el mismo usuario)
-POST {{APIkey_HostAddress}}/api/apikeys/regenerate
+### Consultar perfil de sesión y capacidades de UI (validado contra BD, sin nombres de rol)
+GET {{APIkey_HostAddress}}/api/auth/me
 Accept: application/json
-X-API-KEY: ak_pega_aqui_tu_clave_actual
+X-API-KEY: {{ApiKey}}

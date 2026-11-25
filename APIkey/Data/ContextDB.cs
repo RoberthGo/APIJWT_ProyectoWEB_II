@@ -29,6 +29,8 @@ public partial class ContextDB : DbContext
 
     public virtual DbSet<ApiKey> ApiKeys { get; set; }
 
+    public virtual DbSet<Role> Roles { get; set; }
+
     public virtual DbSet<User> Users { get; set; }
     public virtual DbSet<Product> Products { get; set; }
 
@@ -45,6 +47,22 @@ public partial class ContextDB : DbContext
             .UseCollation("utf8mb4_0900_ai_ci")
             .HasCharSet("utf8mb4");
         
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PRIMARY");
+            entity.ToTable("roles");
+
+            entity.HasIndex(e => e.Name).IsUnique();
+
+            entity.Property(e => e.Name).HasMaxLength(30).IsRequired();
+
+            entity.HasData(
+                new Role { Id = Role.AdminId, Name = Role.AdminName },
+                new Role { Id = Role.EmpleadoId, Name = Role.EmpleadoName },
+                new Role { Id = Role.ClienteId, Name = Role.ClienteName }
+            );
+        });
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PRIMARY");
@@ -52,12 +70,20 @@ public partial class ContextDB : DbContext
 
             entity.HasIndex(e => e.Username).IsUnique();
             entity.HasIndex(e => e.Email).IsUnique();
+            entity.HasIndex(e => e.RoleId, "IX_users_RoleId");
 
             entity.Property(e => e.Username).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Email).HasMaxLength(150).IsRequired();
             entity.Property(e => e.PasswordHash).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.RoleId).HasDefaultValue(Role.ClienteId).IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnType("datetime").IsRequired();
             entity.Property(e => e.IsActive).HasColumnType("tinyint(1)").IsRequired();
+
+            entity.HasOne(u => u.Role)
+                .WithMany(r => r.Users)
+                .HasForeignKey(u => u.RoleId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("users_ibfk_role");
         });
 
         modelBuilder.Entity<Category>(entity =>

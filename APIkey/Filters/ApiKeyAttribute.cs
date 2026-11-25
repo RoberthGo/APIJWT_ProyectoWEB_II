@@ -1,26 +1,28 @@
 using System;
-using APIkey.Controllers;
+using System.Linq;
+using System.Threading.Tasks;
 using APIkey.Data;
+using APIkey.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace APIkey.Filters;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public class ApiKeyAttribute : ActionFilterAttribute, IAsyncActionFilter
+public class ApiKeyAttribute : Attribute, IAsyncAuthorizationFilter, IOrderedFilter
 {
     private const string API_KEY_HEADER_NAME = "X-API-KEY";
 
-    public override async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    public int Order => 0;
+
+    public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
         // Permitir solicitudes preflight de CORS
         if (HttpMethods.IsOptions(context.HttpContext.Request.Method))
         {
-            await next();
             return;
         }
 
@@ -44,19 +46,8 @@ public class ApiKeyAttribute : ActionFilterAttribute, IAsyncActionFilter
         }
 
         var providedApiKey = extractedApiKey.ToString().Trim();
-
-        var appSettings = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
-        var configuredApiKey = appSettings.GetValue<string>("ApiKey") ?? appSettings.GetValue<string>("ApiSettings:ApiKey");
-
-        if (!string.IsNullOrWhiteSpace(configuredApiKey) &&
-            string.Equals(configuredApiKey.Trim(), providedApiKey, StringComparison.Ordinal))
-        {
-            await next();
-            return;
-        }
-
         var dbContext = context.HttpContext.RequestServices.GetRequiredService<ContextDB>();
-        var providedApiKeyHash = ApiKeysController.HashApiKey(providedApiKey);
+        var providedApiKeyHash = SecurityHelper.HashApiKey(providedApiKey);
         var utcNow = DateTime.UtcNow;
 
         var matchedKey = await dbContext.ApiKeys
@@ -85,7 +76,32 @@ public class ApiKeyAttribute : ActionFilterAttribute, IAsyncActionFilter
             return;
         }
 
-        context.HttpContext.Items["ClientIdentifier"] = matchedKey.ClientIdentifier;
-        await next();
+        var normalizedClient = matchedKey.ClientIdentifier.Trim().ToLowerInvariant();
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Username.ToLower() == normalizedClient && u.IsActive);
+
+        if (user == null || user.Role == null)
+        {
+            var problemDetails = new ProblemDetails
+            {
+                Status = StatusCodes.Status401Unauthorized,
+                Title = "No autorizado",
+                Detail = "La cuenta asociada a la API Key no existe o se encuentra inactiva.",
+                Instance = context.HttpContext.Request.Path
+            };
+
+            context.Result = new ObjectResult(problemDetails)
+            {
+                StatusCode = StatusCodes.Status401Unauthorized,
+                ContentTypes = { "application/problem+json" }
+            };
+            return;
+        }
+
+        context.HttpContext.Items["ClientIdentifier"] = user.Username;
+        context.HttpContext.Items["UserId"] = user.Id;
+        context.HttpContext.Items["UserRole"] = user.Role.Name;
     }
 }

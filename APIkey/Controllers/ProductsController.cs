@@ -1,4 +1,8 @@
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
@@ -74,8 +78,9 @@ namespace APIkey.Controllers
         }
 
         // POST: api/Products
-        // Valida con DataAnnotations antes de guardar
+        // Solo ADMIN (validado en BD) puede crear productos
         [HttpPost]
+        [RequireRoles(Role.AdminName)]
         public async Task<ActionResult<ProductDto>> PostProduct(ProductUpsertDto dto)
         {
             try
@@ -101,19 +106,20 @@ namespace APIkey.Controllers
 
                 return CreatedAtAction(nameof(GetProduct), new { id = product.ProductId }, responseDto);
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al registrar producto",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    detail: "No fue posible registrar el producto. Verifica los datos ingresados."
                 );
             }
         }
 
         // PUT: api/Products/5
-        // Actualiza un producto existente validando los datos recibidos
+        // ADMIN puede actualizar todos los campos; EMPLEADO solo precio y existencias (validado en BD)
         [HttpPut("{id}")]
+        [RequireRoles(Role.AdminName, Role.EmpleadoName)]
         public async Task<IActionResult> PutProduct(int id, ProductUpsertDto dto)
         {
             var product = await _context.Products.FindAsync(id);
@@ -126,28 +132,35 @@ namespace APIkey.Controllers
                 );
             }
 
-            product.ProductName = dto.ProductName;
+            var currentRole = (HttpContext.Items["UserRole"] as string ?? string.Empty).Trim().ToUpperInvariant();
+            if (currentRole == Role.AdminName)
+            {
+                product.ProductName = dto.ProductName;
+                product.Discontinued = dto.Discontinued;
+            }
+
             product.UnitPrice = dto.UnitPrice;
             product.UnitsInStock = dto.UnitsInStock;
-            product.Discontinued = dto.Discontinued;
 
             try
             {
                 await _context.SaveChangesAsync();
                 return NoContent();
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al actualizar producto",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    detail: "No fue posible actualizar el producto. Verifica los datos ingresados."
                 );
             }
         }
 
         // DELETE: api/Products/5
+        // Solo ADMIN (validado en BD) puede eliminar productos
         [HttpDelete("{id}")]
+        [RequireRoles(Role.AdminName)]
         public async Task<IActionResult> DeleteProduct(int id)
         {
             var product = await _context.Products.FindAsync(id);

@@ -11,52 +11,22 @@ using Microsoft.EntityFrameworkCore;
 using APIkey.Data;
 using APIkey.DTOs;
 using APIkey.Filters;
+using APIkey.Models;
 
 namespace APIkey.Controllers
 {
     [EnableCors("AllowAll")]
     [ApiKey]
+    [RequireRoles(Role.AdminName, Role.EmpleadoName)]
     [Route("api/[controller]")]
     [ApiController]
     public class CustomersController : ControllerBase
     {
-        private static readonly HashSet<string> ExcludedNonClientUsernames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "admin",
-            "administrador",
-            "empleado",
-            "operador",
-            "ventas"
-        };
-
-        private const string EmployeePrefix = "emp_";
-
         private readonly ContextDB _context;
 
         public CustomersController(ContextDB context)
         {
             _context = context;
-        }
-
-        private static bool IsClientAccount(string? username)
-        {
-            if (string.IsNullOrWhiteSpace(username))
-            {
-                return false;
-            }
-
-            var normalized = username.Trim().ToLowerInvariant();
-            if (ExcludedNonClientUsernames.Contains(normalized))
-            {
-                return false;
-            }
-
-            if (normalized.StartsWith(EmployeePrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            return true;
         }
 
         private static string ExtractAsciiInitials(string username)
@@ -163,23 +133,20 @@ namespace APIkey.Controllers
                 StringComparer.OrdinalIgnoreCase
             );
 
-            var activeUsers = await _context.Users
+            // Filtrar usuarios activos exclusivamente por su rol CLIENTE en base de datos
+            var activeClientUsers = await _context.Users
                 .AsNoTracking()
-                .Where(u => u.IsActive)
+                .Include(u => u.Role)
+                .Where(u => u.IsActive && u.Role != null && u.Role.Name == Role.ClienteName)
                 .OrderBy(u => u.Id)
                 .Select(u => new { u.Id, u.Username, u.Email })
                 .ToListAsync();
 
-            var unified = new List<CustomerDto>(northwindCustomers.Count + activeUsers.Count);
+            var unified = new List<CustomerDto>(northwindCustomers.Count + activeClientUsers.Count);
             unified.AddRange(northwindCustomers);
 
-            foreach (var user in activeUsers)
+            foreach (var user in activeClientUsers)
             {
-                if (!IsClientAccount(user.Username))
-                {
-                    continue;
-                }
-
                 var dynamicId = GenerateDynamicCustomerId(user.Username, usedIds);
                 unified.Add(new CustomerDto
                 {
@@ -193,7 +160,7 @@ namespace APIkey.Controllers
         }
 
         // GET: api/customers
-        // Retorna clientes de Northwind y usuarios registrados con perfil CLIENTE en una sola lista unificada
+        // Retorna clientes de Northwind y usuarios registrados con rol CLIENTE en BD en una sola lista unificada
         [HttpGet]
         public async Task<ActionResult<IEnumerable<CustomerDto>>> GetCustomers()
         {

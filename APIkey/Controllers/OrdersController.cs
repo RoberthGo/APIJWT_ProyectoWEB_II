@@ -29,21 +29,6 @@ namespace APIkey.Controllers
 
         private static readonly TimeSpan TransitWindow = TimeSpan.FromDays(7);
 
-        private static readonly HashSet<string> AdminUsernames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "admin",
-            "administrador"
-        };
-
-        private static readonly HashSet<string> EmployeeUsernames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "empleado",
-            "operador",
-            "ventas"
-        };
-
-        private const string EmployeePrefix = "emp_";
-
         private readonly ContextDB _context;
 
         public OrdersController(ContextDB context)
@@ -62,24 +47,8 @@ namespace APIkey.Controllers
             var normalized = clientIdentifier.Trim().ToLowerInvariant();
             return await _context.Users
                 .AsNoTracking()
+                .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Username.ToLower() == normalized && u.IsActive);
-        }
-
-        private static string ResolveUserRole(string? username)
-        {
-            var normalized = (username ?? string.Empty).Trim().ToLowerInvariant();
-            if (AdminUsernames.Contains(normalized))
-            {
-                return "ADMIN";
-            }
-
-            if (EmployeeUsernames.Contains(normalized) ||
-                normalized.StartsWith(EmployeePrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return "EMPLEADO";
-            }
-
-            return "CLIENTE";
         }
 
         private static string RemoveDiacritics(string text)
@@ -184,7 +153,9 @@ namespace APIkey.Controllers
         }
 
         // GET: api/orders
+        // Solo ADMIN y EMPLEADO (validado en BD) pueden listar todas las órdenes
         [HttpGet]
+        [RequireRoles(Role.AdminName, Role.EmpleadoName)]
         public async Task<ActionResult<IEnumerable<OrderDto>>> GetOrders()
         {
             var orders = await ProjectOrderDtos(
@@ -234,16 +205,27 @@ namespace APIkey.Controllers
         }
 
         // GET: api/orders/{id}
+        // ADMIN y EMPLEADO pueden consultar cualquier orden; CLIENTE solo sus propias órdenes
         [HttpGet("{id}")]
         public async Task<ActionResult<OrderDto>> GetOrder(int id)
         {
-            var order = await ProjectOrderDtos(
-                _context.Orders
-                    .AsNoTracking()
-                    .Where(o => o.OrderId == id)
-            ).FirstOrDefaultAsync();
+            var user = await ResolveCurrentUserAsync();
+            if (user == null || user.Role == null)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "Usuario no identificado",
+                    detail: "No se pudo identificar un usuario activo asociado a la API Key proporcionada."
+                );
+            }
 
-            if (order == null)
+            var orderEntity = await _context.Orders
+                .AsNoTracking()
+                .Where(o => o.OrderId == id)
+                .Select(o => new { o.OrderId, o.UserId })
+                .FirstOrDefaultAsync();
+
+            if (orderEntity == null)
             {
                 return Problem(
                     statusCode: StatusCodes.Status404NotFound,
@@ -252,13 +234,30 @@ namespace APIkey.Controllers
                 );
             }
 
+            var dbRole = user.Role.Name.Trim().ToUpperInvariant();
+            if (dbRole != Role.AdminName && dbRole != Role.EmpleadoName && orderEntity.UserId != user.Id)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Acceso denegado",
+                    detail: "No tienes permiso para consultar una orden que no pertenece a tu cuenta."
+                );
+            }
+
+            var order = await ProjectOrderDtos(
+                _context.Orders
+                    .AsNoTracking()
+                    .Where(o => o.OrderId == id)
+            ).FirstAsync();
+
             FinalizeOrderDto(order);
             return Ok(order);
         }
 
         // POST: api/orders
-        // Crea una orden asociada al usuario autenticado, registra sus detalles y descuenta stock en una transacción atómica
+        // Solo CLIENTE (validado en BD) puede registrar compras desde el catálogo
         [HttpPost]
+        [RequireRoles(Role.ClienteName)]
         public async Task<ActionResult<OrderDto>> PostOrder(CreateOrderDto dto)
         {
             var user = await ResolveCurrentUserAsync();
@@ -390,18 +389,19 @@ namespace APIkey.Controllers
 
                 return CreatedAtAction(nameof(GetOrder), new { id = order.OrderId }, createdDto);
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 await transaction.RollbackAsync();
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al registrar el pedido",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    detail: "No fue posible registrar el pedido. Verifica los datos e intenta nuevamente."
                 );
             }
         }
 
         // PATCH: api/orders/{id}/status
+        // Validación estricta del rol del usuario en base de datos.
         // ADMIN puede cambiar entre PENDIENTE, PENDIENTE_ENVIO, EN_TRANSITO, ENTREGADO y CANCELADO.
         // CLIENTE puede cancelar únicamente sus propios pedidos si no han sido entregados ni cancelados.
         // Cancelar devuelve atómicamente el stock de los productos y deja el pedido en estado final irreversible.
@@ -409,7 +409,7 @@ namespace APIkey.Controllers
         public async Task<ActionResult<OrderDto>> PatchOrderStatus(int id, UpdateOrderStatusDto dto)
         {
             var user = await ResolveCurrentUserAsync();
-            if (user == null)
+            if (user == null || user.Role == null)
             {
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
@@ -428,22 +428,31 @@ namespace APIkey.Controllers
                 );
             }
 
-            var role = ResolveUserRole(user.Username);
-            if (role == "EMPLEADO")
+            var role = user.Role.Name.Trim().ToUpperInvariant();
+            if (role == Role.EmpleadoName)
             {
                 return Problem(
                     statusCode: StatusCodes.Status403Forbidden,
                     title: "Permisos insuficientes",
-                    detail: "Solo los administradores pueden modificar el estado logístico de los pedidos."
+                    detail: "No tienes permisos para modificar el estado logístico de los pedidos."
                 );
             }
 
-            if (role == "CLIENTE" && targetStatus != StatusCancelado)
+            if (role == Role.ClienteName && targetStatus != StatusCancelado)
             {
                 return Problem(
                     statusCode: StatusCodes.Status403Forbidden,
                     title: "Operación no permitida",
-                    detail: "Los clientes únicamente pueden cancelar sus propios pedidos."
+                    detail: "Solo puedes cancelar tus propios pedidos activos."
+                );
+            }
+
+            if (role != Role.AdminName && role != Role.ClienteName)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Permisos insuficientes",
+                    detail: "No tienes permisos para realizar esta operación."
                 );
             }
 
@@ -472,7 +481,7 @@ namespace APIkey.Controllers
                     .Collection(o => o.OrderDetails)
                     .LoadAsync();
 
-                if (role == "CLIENTE" && order.UserId != user.Id)
+                if (role == Role.ClienteName && order.UserId != user.Id)
                 {
                     await transaction.RollbackAsync();
                     return Problem(
@@ -560,13 +569,13 @@ namespace APIkey.Controllers
                 FinalizeOrderDto(updatedDto, now);
                 return Ok(updatedDto);
             }
-            catch (DbUpdateException ex)
+            catch (DbUpdateException)
             {
                 await transaction.RollbackAsync();
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al actualizar el estado del pedido",
-                    detail: ex.InnerException?.Message ?? ex.Message
+                    detail: "No fue posible actualizar el estado del pedido. Intenta nuevamente."
                 );
             }
         }
