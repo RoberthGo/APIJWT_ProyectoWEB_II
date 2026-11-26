@@ -18,16 +18,76 @@ using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var safeErrors = new Dictionary<string, string[]>();
+            foreach (var entry in context.ModelState)
+            {
+                if (entry.Value?.Errors is not { Count: > 0 } errors) continue;
+                var msgs = errors
+                    .Select(e => e.ErrorMessage?.Trim())
+                    .Where(m => !string.IsNullOrWhiteSpace(m)
+                        && !m.Contains("System.", StringComparison.OrdinalIgnoreCase)
+                        && !m.Contains("JSON", StringComparison.OrdinalIgnoreCase)
+                        && !m.Contains("Exception", StringComparison.OrdinalIgnoreCase)
+                        && !m.Contains("Path:", StringComparison.OrdinalIgnoreCase))
+                    .Cast<string>()
+                    .Distinct()
+                    .ToArray();
+                if (msgs.Length > 0)
+                {
+                    safeErrors[entry.Key] = msgs;
+                }
+            }
+
+            var detail = safeErrors.Values.SelectMany(v => v).FirstOrDefault()
+                ?? "Solicitud inválida. Verifica los datos ingresados.";
+
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Datos inválidos",
+                Detail = detail
+            };
+            if (safeErrors.Count > 0)
+            {
+                problem.Extensions["errors"] = safeErrors;
+            }
+
+            return new ObjectResult(problem)
+            {
+                StatusCode = StatusCodes.Status400BadRequest,
+                ContentTypes = { "application/problem+json; charset=utf-8" }
+            };
+        };
+    });
 builder.Services.AddAltcha(options =>
 {
     options.HmacSignatureSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     options.HmacKeySignatureSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 });
 
-// Soporte nativo para ProblemDetails (RFC 7807)
-builder.Services.AddProblemDetails();
+// Soporte nativo para ProblemDetails (RFC 7807) sin exponer rutas, trazas ni detalles internos
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = ctx =>
+    {
+        ctx.ProblemDetails.Instance = null;
+        ctx.ProblemDetails.Extensions.Remove("traceId");
+        ctx.ProblemDetails.Extensions.Remove("exception");
+        if (ctx.ProblemDetails.Status is >= 500)
+        {
+            ctx.ProblemDetails.Title = "Error interno del servidor";
+            ctx.ProblemDetails.Detail = "Ocurrió un error al procesar la solicitud. Intenta nuevamente más tarde.";
+        }
+    };
+});
 
 // Configuración JWT tipada y validada una sola vez al arranque.
 // Si no se define Jwt:SecretKey (ni en variables de entorno ni en User Secrets),
@@ -150,27 +210,26 @@ builder.Services
                     !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ||
                     string.IsNullOrWhiteSpace(authHeader["Bearer ".Length..]))
                 {
-                    detail = "No se proporcionó un token JWT válido en la cabecera 'Authorization: Bearer <token>'.";
+                    detail = "Se requiere iniciar sesión para realizar esta operación.";
                 }
                 else if (authError == "expired")
                 {
-                    detail = "El token JWT ha expirado. Inicia sesión nuevamente.";
+                    detail = "Tu sesión ha expirado. Inicia sesión nuevamente.";
                 }
                 else if (authError == "inactive")
                 {
-                    detail = "La cuenta asociada al token JWT no existe o se encuentra inactiva.";
+                    detail = "Tu cuenta no se encuentra activa. Inicia sesión nuevamente.";
                 }
                 else
                 {
-                    detail = "El token JWT proporcionado no es válido.";
+                    detail = "No autorizado. Inicia sesión nuevamente.";
                 }
 
                 var problemDetails = new ProblemDetails
                 {
                     Status = StatusCodes.Status401Unauthorized,
                     Title = "No autorizado",
-                    Detail = detail,
-                    Instance = context.Request.Path
+                    Detail = detail
                 };
 
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -183,8 +242,7 @@ builder.Services
                 {
                     Status = StatusCodes.Status403Forbidden,
                     Title = "Acceso denegado",
-                    Detail = "No tienes permisos suficientes para realizar esta operación.",
-                    Instance = context.Request.Path
+                    Detail = "No tienes permisos suficientes para realizar esta operación."
                 };
 
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -286,11 +344,13 @@ app.UseExceptionHandler();
 // Convierte códigos de estado vacíos en ProblemDetails
 app.UseStatusCodePages();
 
-// Cabeceras anti-clickjacking en todas las respuestas
+// Cabeceras de seguridad en todas las respuestas
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none';";
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
     await next();
 });
 

@@ -168,7 +168,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
                     title: "Usuario no identificado",
-                    detail: "No se pudo identificar un usuario activo asociado al token JWT proporcionado."
+                    detail: "No se pudo validar tu sesión activa."
                 );
             }
 
@@ -199,7 +199,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
                     title: "Usuario no identificado",
-                    detail: "No se pudo identificar un usuario activo asociado al token JWT proporcionado."
+                    detail: "No se pudo validar tu sesión activa."
                 );
             }
 

@@ -24,6 +24,30 @@ namespace APIkey.Migrations
             MySqlModelBuilderExtensions.HasCharSet(modelBuilder, "utf8mb4");
             MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
 
+            modelBuilder.Entity("APIkey.Models.CartItem", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("int")
+                        .HasColumnName("UserID");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("ProductID");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("datetime");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.HasKey("UserId", "ProductId")
+                        .HasName("PRIMARY");
+
+                    b.HasIndex(new[] { "ProductId" }, "IX_cart_items_ProductID");
+
+                    b.ToTable("cart_items", (string)null);
+                });
+
             modelBuilder.Entity("APIkey.Models.Category", b =>
                 {
                     b.Property<int>("CategoryId")
@@ -603,6 +627,27 @@ namespace APIkey.Migrations
                     b.HasIndex(new[] { "RoleId" }, "IX_users_RoleId");
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("APIkey.Models.CartItem", b =>
+                {
+                    b.HasOne("APIkey.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("cart_items_ibfk_product");
+
+                    b.HasOne("APIkey.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("cart_items_ibfk_user");
+
+                    b.Navigation("Product");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("APIkey.Models.Employee", b =>

@@ -30,6 +30,7 @@ public partial class ContextDB : DbContext
 
     public virtual DbSet<User> Users { get; set; }
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+    public virtual DbSet<CartItem> CartItems { get; set; }
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<Shipper> Shippers { get; set; }
@@ -82,6 +83,33 @@ public partial class ContextDB : DbContext
                 .HasForeignKey(u => u.RoleId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("users_ibfk_role");
+        });
+
+        modelBuilder.Entity<CartItem>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.ProductId })
+                .HasName("PRIMARY");
+
+            entity.ToTable("cart_items");
+
+            entity.HasIndex(e => e.ProductId, "IX_cart_items_ProductID");
+
+            entity.Property(e => e.UserId).HasColumnName("UserID");
+            entity.Property(e => e.ProductId).HasColumnName("ProductID");
+            entity.Property(e => e.Quantity).IsRequired();
+            entity.Property(e => e.AddedAt).HasColumnType("datetime").IsRequired();
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("cart_items_ibfk_user");
+
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("cart_items_ibfk_product");
         });
 
         modelBuilder.Entity<Category>(entity =>
