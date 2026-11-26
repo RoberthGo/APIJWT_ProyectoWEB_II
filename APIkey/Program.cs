@@ -310,56 +310,15 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Configuración de CORS: en producción solo se permiten los orígenes declarados (https://robes.gay).
-// En desarrollo también se permite localhost / 127.0.0.1 para pruebas locales.
-const string corsPolicyName = "FrontendCorsPolicy";
-var allowedOrigins = builder.Configuration
-    .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>()?
-    .Where(origin => !string.IsNullOrWhiteSpace(origin))
-    .Select(origin => origin.Trim().TrimEnd('/'))
-    .Distinct(StringComparer.OrdinalIgnoreCase)
-    .ToArray();
-
-if (allowedOrigins is null || allowedOrigins.Length == 0)
-{
-    allowedOrigins = ["https://robes.gay"];
-}
-
+// Configure CORS to allow connections from any origin, method, and header
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(corsPolicyName, policy =>
+    options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithExposedHeaders("Retry-After");
-        if (builder.Environment.IsDevelopment())
-        {
-            policy.SetIsOriginAllowed(origin =>
-                  {
-                      if (string.IsNullOrWhiteSpace(origin))
-                      {
-                          return false;
-                      }
-
-                      var normalized = origin.Trim().TrimEnd('/');
-                      if (allowedOrigins.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-                      {
-                          return true;
-                      }
-
-                      return Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
-                             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
-                             && (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                                 || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
-                  })
-                  .AllowAnyMethod()
-                  .AllowAnyHeader();
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyMethod()
-                  .AllowAnyHeader();
-        }
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .WithExposedHeaders("Retry-After");
     });
 });
 
@@ -395,7 +354,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Enable CORS before Authentication & Authorization
-app.UseCors(corsPolicyName);
+app.UseCors("AllowAll");
 
 app.UseAuthentication();
 app.UseAuthorization();
