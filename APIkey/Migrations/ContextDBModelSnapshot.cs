@@ -213,6 +213,22 @@ namespace APIkey.Migrations
                     MySqlEntityTypeBuilderExtensions.UseCollation(b, "utf8mb3_general_ci");
                 });
 
+            modelBuilder.Entity("APIkey.Models.LoginAttempt", b =>
+                {
+                    b.Property<int>("AccountKey")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Failures")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("AccountKey");
+
+                    b.ToTable("login_attempts");
+                });
+
             modelBuilder.Entity("APIkey.Models.Order", b =>
                 {
                     b.Property<int>("OrderId")

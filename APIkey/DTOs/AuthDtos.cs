@@ -6,6 +6,8 @@ namespace APIkey.DTOs;
 // POST /api/auth/register
 public class RegisterDto
 {
+    public string? Altcha { get; set; }
+
     [Required]
     public string Username { get; set; } = string.Empty;
 
@@ -21,6 +23,8 @@ public class RegisterDto
 // POST /api/auth/login
 public class LoginDto
 {
+    public string? Altcha { get; set; }
+
     [Required]
     public string Username { get; set; } = string.Empty;
 

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Altcha.AspNetCore;
 using APIkey.Data;
 using APIkey.Options;
 using APIkey.Services;
@@ -19,6 +20,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddAltcha(options =>
+{
+    options.HmacSignatureSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    options.HmacKeySignatureSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+});
 
 // Soporte nativo para ProblemDetails (RFC 7807)
 builder.Services.AddProblemDetails();
@@ -236,6 +242,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy(corsPolicyName, policy =>
     {
+        policy.WithExposedHeaders("Retry-After");
         if (builder.Environment.IsDevelopment())
         {
             policy.SetIsOriginAllowed(origin =>
@@ -302,6 +309,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapAltchaChallenge("/api/auth/altcha/challenge").AllowAnonymous();
 
 // Aplica automáticamente las migraciones pendientes al iniciar
 using (var scope = app.Services.CreateScope())

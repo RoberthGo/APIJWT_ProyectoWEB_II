@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Altcha.AspNetCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -18,13 +19,16 @@ namespace APIkey.Controllers
     [ApiController]
     public class AuthController : ControllerBase
     {
+        private static readonly string DummyPasswordHash = SecurityHelper.HashPassword(string.Empty);
         private readonly ContextDB _context;
         private readonly IJwtTokenService _jwtTokenService;
+        private readonly IAltchaService _altcha;
 
-        public AuthController(ContextDB context, IJwtTokenService jwtTokenService)
+        public AuthController(ContextDB context, IJwtTokenService jwtTokenService, IAltchaService altcha)
         {
             _context = context;
             _jwtTokenService = jwtTokenService;
+            _altcha = altcha;
         }
 
         // POST: api/auth/register
@@ -33,6 +37,9 @@ namespace APIkey.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostRegister(RegisterDto dto)
         {
+            if (!(await _altcha.VerifyAsync(dto.Altcha)).Verified)
+                return CaptchaRequired();
+
             var usernameExists = await _context.Users
                 .AnyAsync(u => u.Username.ToLower() == dto.Username.Trim().ToLower());
 
@@ -104,13 +111,34 @@ namespace APIkey.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<AuthResponseDto>> PostLogin(LoginDto dto)
         {
+            var username = dto.Username.Trim();
             var user = await _context.Users
                 .AsNoTracking()
                 .Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Username.ToLower() == dto.Username.Trim().ToLower() && u.IsActive);
+                .FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower() && u.IsActive);
 
-            if (user == null || user.Role == null || !SecurityHelper.VerifyPassword(dto.Password, user.PasswordHash))
+            var key = user?.Id ?? LoginAttempt.UnknownAccountKey(username);
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            // El upsert toma un bloqueo de fila hasta el commit, incluso para intentos simultáneos.
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"INSERT INTO login_attempts (AccountKey, Failures) VALUES ({key}, 0) ON DUPLICATE KEY UPDATE AccountKey = AccountKey");
+            var attempt = (await _context.LoginAttempts.FindAsync(key))!;
+            var now = DateTime.UtcNow;
+            if (attempt.LockedUntil > now)
+                return LoginLocked(attempt.LockedUntil.Value - now);
+
+            if ((attempt.LockedUntil.HasValue || dto.Altcha != null) && !(await _altcha.VerifyAsync(dto.Altcha)).Verified)
+                return CaptchaRequired();
+
+            var passwordMatches = SecurityHelper.VerifyPassword(dto.Password, user?.PasswordHash ?? DummyPasswordHash);
+            if (user == null || user.Role == null || !passwordMatches)
             {
+                attempt.RecordFailure(now);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                if (attempt.LockedUntil > now)
+                    return LoginLocked(attempt.LockedUntil.Value - now);
+
                 return Problem(
                     statusCode: StatusCodes.Status401Unauthorized,
                     title: "Credenciales inválidas",
@@ -118,6 +146,9 @@ namespace APIkey.Controllers
                 );
             }
 
+            _context.LoginAttempts.Remove(attempt);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
             var (token, expiresAt) = _jwtTokenService.GenerateToken(user);
             var (defaultView, permissions) = SecurityHelper.BuildUiProfile(user.Role.Name);
 
@@ -131,6 +162,16 @@ namespace APIkey.Controllers
                 DefaultView = defaultView,
                 Permissions = permissions
             });
+        }
+
+        private ObjectResult CaptchaRequired() =>
+            UnprocessableEntity(new { detail = "Completa la verificación ALTCHA para continuar." });
+
+        private ObjectResult LoginLocked(TimeSpan remaining)
+        {
+            Response.Headers.RetryAfter = Math.Ceiling(remaining.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+            return StatusCode(StatusCodes.Status429TooManyRequests,
+                new { detail = "Espera a que termine el bloqueo para volver a iniciar sesión." });
         }
 
         // GET: api/auth/me
