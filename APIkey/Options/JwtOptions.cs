@@ -20,7 +20,8 @@ public sealed class JwtOptions
     {
         if (string.IsNullOrWhiteSpace(SecretKey))
         {
-            throw new InvalidOperationException("La configuración 'Jwt:SecretKey' es obligatoria.");
+            throw new InvalidOperationException(
+                "La configuración 'Jwt:SecretKey' es obligatoria. Defínela mediante variables de entorno (Jwt__SecretKey en Azure) o User Secrets en desarrollo (dotnet user-secrets set \"Jwt:SecretKey\" \"<clave>\").");
         }
 
         if (string.IsNullOrWhiteSpace(Issuer))

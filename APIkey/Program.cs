@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 using APIkey.Data;
 using APIkey.Options;
@@ -22,13 +23,27 @@ builder.Services.AddControllers();
 // Soporte nativo para ProblemDetails (RFC 7807)
 builder.Services.AddProblemDetails();
 
-// Configuración JWT tipada y validada una sola vez al arranque
+// Configuración JWT tipada y validada una sola vez al arranque.
+// Si no se define Jwt:SecretKey (ni en variables de entorno ni en User Secrets),
+// se genera automáticamente una clave criptográfica aleatoria de 512 bits en memoria al iniciar.
 var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
 var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
+var effectiveSecretKey = string.IsNullOrWhiteSpace(jwtOptions.SecretKey)
+    ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(64))
+    : jwtOptions.SecretKey;
+jwtOptions.SecretKey = effectiveSecretKey;
 jwtOptions.Validate();
 
 builder.Services.Configure<JwtOptions>(jwtSection);
-builder.Services.PostConfigure<JwtOptions>(opts => opts.Validate());
+builder.Services.PostConfigure<JwtOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.SecretKey))
+    {
+        opts.SecretKey = effectiveSecretKey;
+    }
+
+    opts.Validate();
+});
 
 // Servicio Singleton de emisión de tokens JWT
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
@@ -201,14 +216,55 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Configure CORS to allow connections from any origin, method, and header
+// Configuración de CORS: en producción solo se permiten los orígenes declarados (https://robes.gay).
+// En desarrollo también se permite localhost / 127.0.0.1 para pruebas locales.
+const string corsPolicyName = "FrontendCorsPolicy";
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+
+if (allowedOrigins is null || allowedOrigins.Length == 0)
+{
+    allowedOrigins = ["https://robes.gay"];
+}
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy(corsPolicyName, policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(origin =>
+                  {
+                      if (string.IsNullOrWhiteSpace(origin))
+                      {
+                          return false;
+                      }
+
+                      var normalized = origin.Trim().TrimEnd('/');
+                      if (allowedOrigins.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                      {
+                          return true;
+                      }
+
+                      return Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
+                             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                             && (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                 || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
+                  })
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
     });
 });
 
@@ -240,7 +296,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Enable CORS before Authentication & Authorization
-app.UseCors("AllowAll");
+app.UseCors(corsPolicyName);
 
 app.UseAuthentication();
 app.UseAuthorization();
