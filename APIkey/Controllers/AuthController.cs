@@ -48,7 +48,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Usuario duplicado",
-                    detail: $"El nombre de usuario '{dto.Username}' ya se encuentra registrado."
+                    detail: "El nombre de usuario ya se encuentra registrado."
                 );
             }
 
@@ -60,7 +60,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Correo duplicado",
-                    detail: $"El correo electrónico '{dto.Email}' ya se encuentra registrado."
+                    detail: "El correo electrónico ya se encuentra registrado."
                 );
             }
 
@@ -165,13 +165,20 @@ namespace APIkey.Controllers
         }
 
         private ObjectResult CaptchaRequired() =>
-            UnprocessableEntity(new { detail = "Completa la verificación ALTCHA para continuar." });
+            Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Verificación requerida",
+                detail: "Completa la verificación ALTCHA para continuar."
+            );
 
         private ObjectResult LoginLocked(TimeSpan remaining)
         {
             Response.Headers.RetryAfter = Math.Ceiling(remaining.TotalSeconds).ToString(CultureInfo.InvariantCulture);
-            return StatusCode(StatusCodes.Status429TooManyRequests,
-                new { detail = "Espera a que termine el bloqueo para volver a iniciar sesión." });
+            return Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "Acceso bloqueado temporalmente",
+                detail: "Espera a que termine el bloqueo para volver a iniciar sesión."
+            );
         }
 
         // GET: api/auth/me

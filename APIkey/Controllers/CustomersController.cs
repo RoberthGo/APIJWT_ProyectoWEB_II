@@ -84,7 +84,7 @@ namespace APIkey.Controllers
                 return Problem(
                     statusCode: StatusCodes.Status404NotFound,
                     title: "Cliente no encontrado",
-                    detail: $"No se encontró ningún cliente con el ID '{id}'."
+                    detail: "No se encontró el cliente solicitado."
                 );
             }
 

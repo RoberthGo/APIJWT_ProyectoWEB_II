@@ -29,14 +29,26 @@ builder.Services.AddControllers()
             var safeErrors = new Dictionary<string, string[]>();
             foreach (var entry in context.ModelState)
             {
+                if (string.IsNullOrWhiteSpace(entry.Key)
+                    || entry.Key.StartsWith("$", StringComparison.Ordinal)
+                    || string.Equals(entry.Key, "dto", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 if (entry.Value?.Errors is not { Count: > 0 } errors) continue;
                 var msgs = errors
                     .Select(e => e.ErrorMessage?.Trim())
                     .Where(m => !string.IsNullOrWhiteSpace(m)
+                        && !m.StartsWith("The ", StringComparison.OrdinalIgnoreCase)
+                        && !m.StartsWith("A non-empty", StringComparison.OrdinalIgnoreCase)
+                        && !m.StartsWith("Could not", StringComparison.OrdinalIgnoreCase)
+                        && !m.StartsWith("Unexpected", StringComparison.OrdinalIgnoreCase)
                         && !m.Contains("System.", StringComparison.OrdinalIgnoreCase)
                         && !m.Contains("JSON", StringComparison.OrdinalIgnoreCase)
                         && !m.Contains("Exception", StringComparison.OrdinalIgnoreCase)
-                        && !m.Contains("Path:", StringComparison.OrdinalIgnoreCase))
+                        && !m.Contains("Path:", StringComparison.OrdinalIgnoreCase)
+                        && !m.Contains("byte position", StringComparison.OrdinalIgnoreCase))
                     .Cast<string>()
                     .Distinct()
                     .ToArray();
@@ -79,12 +91,30 @@ builder.Services.AddProblemDetails(options =>
     options.CustomizeProblemDetails = ctx =>
     {
         ctx.ProblemDetails.Instance = null;
+        ctx.ProblemDetails.Type = null;
         ctx.ProblemDetails.Extensions.Remove("traceId");
         ctx.ProblemDetails.Extensions.Remove("exception");
         if (ctx.ProblemDetails.Status is >= 500)
         {
+            ctx.ProblemDetails.Extensions.Clear();
             ctx.ProblemDetails.Title = "Error interno del servidor";
             ctx.ProblemDetails.Detail = "Ocurrió un error al procesar la solicitud. Intenta nuevamente más tarde.";
+        }
+        else if (ctx.ProblemDetails.Status == StatusCodes.Status404NotFound
+                 && string.IsNullOrWhiteSpace(ctx.ProblemDetails.Detail))
+        {
+            ctx.ProblemDetails.Title = "No encontrado";
+            ctx.ProblemDetails.Detail = "El recurso solicitado no existe.";
+        }
+        else if (ctx.ProblemDetails.Status == StatusCodes.Status405MethodNotAllowed)
+        {
+            ctx.ProblemDetails.Title = "Método no permitido";
+            ctx.ProblemDetails.Detail = "La operación solicitada no está permitida.";
+        }
+        else if (ctx.ProblemDetails.Status == StatusCodes.Status415UnsupportedMediaType)
+        {
+            ctx.ProblemDetails.Title = "Formato no soportado";
+            ctx.ProblemDetails.Detail = "El formato de la solicitud no es válido.";
         }
     };
 });
@@ -351,6 +381,8 @@ app.Use(async (context, next) =>
     context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none';";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Cache-Control"] = "no-store";
+    context.Response.Headers.Remove("X-Powered-By");
     await next();
 });
 

@@ -8,15 +8,17 @@ public class RegisterDto
 {
     public string? Altcha { get; set; }
 
-    [Required]
+    [Required(ErrorMessage = "El nombre de usuario es obligatorio.")]
+    [StringLength(50, MinimumLength = 3, ErrorMessage = "El nombre de usuario debe tener entre 3 y 50 caracteres.")]
     public string Username { get; set; } = string.Empty;
 
-    [Required]
-    [EmailAddress]
+    [Required(ErrorMessage = "El correo electrónico es obligatorio.")]
+    [EmailAddress(ErrorMessage = "Debes ingresar un correo electrónico válido.")]
+    [MaxLength(150, ErrorMessage = "El correo electrónico no puede exceder 150 caracteres.")]
     public string Email { get; set; } = string.Empty;
 
-    [Required]
-    [MinLength(8)]
+    [Required(ErrorMessage = "La contraseña es obligatoria.")]
+    [MinLength(8, ErrorMessage = "La contraseña debe tener al menos 8 caracteres.")]
     public string Password { get; set; } = string.Empty;
 }
 
@@ -25,10 +27,10 @@ public class LoginDto
 {
     public string? Altcha { get; set; }
 
-    [Required]
+    [Required(ErrorMessage = "El nombre de usuario es obligatorio.")]
     public string Username { get; set; } = string.Empty;
 
-    [Required]
+    [Required(ErrorMessage = "La contraseña es obligatoria.")]
     public string Password { get; set; } = string.Empty;
 }
 

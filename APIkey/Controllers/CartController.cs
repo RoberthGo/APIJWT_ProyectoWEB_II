@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using APIkey.Data;
 using APIkey.DTOs;
 using APIkey.Models;
@@ -30,6 +32,26 @@ namespace APIkey.Controllers
         {
             var rawUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
             return int.TryParse(rawUserId, NumberStyles.Integer, CultureInfo.InvariantCulture, out userId) && userId > 0;
+        }
+
+        private async Task<bool> LockActiveUserAsync(int userId)
+        {
+            var users = await _context.Users
+                .FromSqlInterpolated($"SELECT * FROM users WHERE Id = {userId} AND IsActive = 1 FOR UPDATE")
+                .ToListAsync();
+            return users.Count > 0;
+        }
+
+        private static async Task RollbackQuietlyAsync(IDbContextTransaction transaction)
+        {
+            try
+            {
+                await transaction.RollbackAsync();
+            }
+            catch
+            {
+                // Ignorar error de rollback si la transacción ya fue abortada por la BD
+            }
         }
 
         private async Task<CartDto> BuildCartDtoAsync(int userId)
@@ -93,7 +115,17 @@ namespace APIkey.Controllers
 
             try
             {
-                // Bloqueo en orden estricto (cart_items -> products) para evitar interbloqueos
+                // Bloqueo en orden estricto (users -> cart_items -> products) para evitar interbloqueos y condiciones de carrera
+                if (!await LockActiveUserAsync(userId))
+                {
+                    await RollbackQuietlyAsync(transaction);
+                    return Problem(
+                        statusCode: StatusCodes.Status401Unauthorized,
+                        title: "No autorizado",
+                        detail: "No se pudo validar tu sesión activa."
+                    );
+                }
+
                 var existingItem = (await _context.CartItems
                     .FromSqlInterpolated($"SELECT * FROM cart_items WHERE UserID = {userId} AND ProductID = {dto.ProductId} FOR UPDATE")
                     .ToListAsync())
@@ -106,7 +138,7 @@ namespace APIkey.Controllers
 
                 if (product == null)
                 {
-                    await transaction.RollbackAsync();
+                    await RollbackQuietlyAsync(transaction);
                     return Problem(
                         statusCode: StatusCodes.Status404NotFound,
                         title: "Producto no encontrado",
@@ -116,7 +148,7 @@ namespace APIkey.Controllers
 
                 if (product.Discontinued == true)
                 {
-                    await transaction.RollbackAsync();
+                    await RollbackQuietlyAsync(transaction);
                     return Problem(
                         statusCode: StatusCodes.Status400BadRequest,
                         title: "Producto descontinuado",
@@ -127,7 +159,7 @@ namespace APIkey.Controllers
                 var currentStock = product.UnitsInStock ?? 0;
                 if (currentStock < dto.Quantity)
                 {
-                    await transaction.RollbackAsync();
+                    await RollbackQuietlyAsync(transaction);
                     return Problem(
                         statusCode: StatusCodes.Status409Conflict,
                         title: "Stock insuficiente",
@@ -138,7 +170,7 @@ namespace APIkey.Controllers
                 var newCartQuantity = (existingItem?.Quantity ?? 0) + dto.Quantity;
                 if (newCartQuantity < 1 || newCartQuantity > 32767)
                 {
-                    await transaction.RollbackAsync();
+                    await RollbackQuietlyAsync(transaction);
                     return Problem(
                         statusCode: StatusCodes.Status400BadRequest,
                         title: "Cantidad inválida",
@@ -169,9 +201,9 @@ namespace APIkey.Controllers
                 var cart = await BuildCartDtoAsync(userId);
                 return Ok(cart);
             }
-            catch (DbUpdateException)
+            catch (Exception ex) when (ex is DbUpdateException or DbException)
             {
-                await transaction.RollbackAsync();
+                await RollbackQuietlyAsync(transaction);
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al actualizar el carrito",
@@ -198,6 +230,16 @@ namespace APIkey.Controllers
 
             try
             {
+                if (!await LockActiveUserAsync(userId))
+                {
+                    await RollbackQuietlyAsync(transaction);
+                    return Problem(
+                        statusCode: StatusCodes.Status401Unauthorized,
+                        title: "No autorizado",
+                        detail: "No se pudo validar tu sesión activa."
+                    );
+                }
+
                 var cartItems = await _context.CartItems
                     .FromSqlInterpolated($"SELECT * FROM cart_items WHERE UserID = {userId} ORDER BY ProductID FOR UPDATE")
                     .ToListAsync();
@@ -223,9 +265,9 @@ namespace APIkey.Controllers
 
                 return Ok(new CartDto());
             }
-            catch (DbUpdateException)
+            catch (Exception ex) when (ex is DbUpdateException or DbException)
             {
-                await transaction.RollbackAsync();
+                await RollbackQuietlyAsync(transaction);
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al cancelar el carrito",
@@ -248,17 +290,44 @@ namespace APIkey.Controllers
                 );
             }
 
+            var shipName = (dto.ShipName ?? string.Empty).Trim();
+            var shipAddress = (dto.ShipAddress ?? string.Empty).Trim();
+            var shipCity = (dto.ShipCity ?? string.Empty).Trim();
+            var shipCountry = (dto.ShipCountry ?? string.Empty).Trim();
+
+            if (shipName.Length < 2 || shipName.Length > 80
+                || shipAddress.Length < 4 || shipAddress.Length > 200
+                || shipCity.Length < 2 || shipCity.Length > 60
+                || shipCountry.Length < 2 || shipCountry.Length > 60)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Datos inválidos",
+                    detail: "Verifica que los datos de envío estén completos y dentro de la longitud permitida."
+                );
+            }
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
             {
+                if (!await LockActiveUserAsync(userId))
+                {
+                    await RollbackQuietlyAsync(transaction);
+                    return Problem(
+                        statusCode: StatusCodes.Status401Unauthorized,
+                        title: "No autorizado",
+                        detail: "No se pudo validar tu sesión activa."
+                    );
+                }
+
                 var cartItems = await _context.CartItems
                     .FromSqlInterpolated($"SELECT * FROM cart_items WHERE UserID = {userId} ORDER BY ProductID FOR UPDATE")
                     .ToListAsync();
 
                 if (cartItems.Count == 0)
                 {
-                    await transaction.RollbackAsync();
+                    await RollbackQuietlyAsync(transaction);
                     return Problem(
                         statusCode: StatusCodes.Status400BadRequest,
                         title: "Carrito vacío",
@@ -279,7 +348,7 @@ namespace APIkey.Controllers
                 {
                     if (!products.TryGetValue(item.ProductId, out var product))
                     {
-                        await transaction.RollbackAsync();
+                        await RollbackQuietlyAsync(transaction);
                         return Problem(
                             statusCode: StatusCodes.Status404NotFound,
                             title: "Producto no encontrado",
@@ -289,7 +358,7 @@ namespace APIkey.Controllers
 
                     if (product.Discontinued == true)
                     {
-                        await transaction.RollbackAsync();
+                        await RollbackQuietlyAsync(transaction);
                         return Problem(
                             statusCode: StatusCodes.Status400BadRequest,
                             title: "Producto descontinuado",
@@ -299,7 +368,7 @@ namespace APIkey.Controllers
 
                     if (item.Quantity < 1 || item.Quantity > 32767)
                     {
-                        await transaction.RollbackAsync();
+                        await RollbackQuietlyAsync(transaction);
                         return Problem(
                             statusCode: StatusCodes.Status400BadRequest,
                             title: "Cantidad inválida",
@@ -334,10 +403,10 @@ namespace APIkey.Controllers
                     RequiredDate = now.AddDays(7),
                     ShippedDate = null,
                     Freight = 0m,
-                    ShipName = dto.ShipName.Trim(),
-                    ShipAddress = dto.ShipAddress.Trim(),
-                    ShipCity = dto.ShipCity.Trim(),
-                    ShipCountry = dto.ShipCountry.Trim(),
+                    ShipName = shipName,
+                    ShipAddress = shipAddress,
+                    ShipCity = shipCity,
+                    ShipCountry = shipCountry,
                     Status = OrdersController.StatusPendiente,
                     OrderDetails = orderDetails
                 };
@@ -365,9 +434,9 @@ namespace APIkey.Controllers
 
                 return StatusCode(StatusCodes.Status201Created, createdDto);
             }
-            catch (DbUpdateException)
+            catch (Exception ex) when (ex is DbUpdateException or DbException)
             {
-                await transaction.RollbackAsync();
+                await RollbackQuietlyAsync(transaction);
                 return Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Error al registrar la compra",
